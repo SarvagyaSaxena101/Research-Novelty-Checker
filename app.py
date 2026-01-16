@@ -1,8 +1,8 @@
 import streamlit as st
-from langchain_community.chat_models import ChatOpenRouter
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
+from langchain_openai import ChatOpenAI
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.prompts import PromptTemplate
+from langchain_classic.chains import LLMChain
 from pypdf import PdfReader
 import re
 import arxiv
@@ -14,9 +14,10 @@ st.title("🔬 Research Novelty Checker")
 
 @st.cache_resource
 def get_llm(api_key):
-    return ChatOpenRouter(
-        model_name="google/gemma-7b-it",
-        openrouter_api_key=api_key
+    return ChatOpenAI(
+        model="openai/gpt-3.5-turbo",
+        openai_api_base="https://openrouter.ai/api/v1",
+        openai_api_key=api_key
     )
 
 @st.cache_resource
