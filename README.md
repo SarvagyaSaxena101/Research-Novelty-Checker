@@ -2,8 +2,9 @@
 
 # 🔬 Research Novelty Checker 🔬
 
-# Deployed Link -  
-May take sometime to 
+# Deployed Link - 
+### https://researchnoveltyai.streamlit.app/
+May take sometime to load buddy but will surely work
 
 
 The **Research Novelty Checker** is your AI-powered lab partner, designed to give your research paper a preliminary review before you submit it to the unforgiving world of peer review. It uses a multi-faceted approach to analyze your work, checking for novelty against existing literature, flagging statistical inconsistencies, and even generating a full-fledged review.
