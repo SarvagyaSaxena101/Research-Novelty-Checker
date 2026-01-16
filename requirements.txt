@@ -1,0 +1,9 @@
+streamlit
+langchain
+langchain-community
+pypdf
+sentence-transformers
+numpy
+arxiv
+faiss-cpu
+lxml
