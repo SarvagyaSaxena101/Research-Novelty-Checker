@@ -10,15 +10,27 @@ import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
 
+MAX_ABSTRACT_LENGTH = 500 # Maximum characters to display for abstracts
+
 st.title("🔬 Research Novelty Checker")
 
 @st.cache_resource
 def get_llm(api_key):
-    return ChatOpenAI(
-        model="openai/gpt-3.5-turbo",
-        openai_api_base="https://openrouter.ai/api/v1",
-        openai_api_key=api_key
-    )
+    try:
+        llm = ChatOpenAI(
+            model="openai/gpt-3.5-turbo",
+            openai_api_base="https://openrouter.ai/api/v1",
+            openai_api_key=api_key
+        )
+        # Try a simple API call to check if the key is valid
+        llm.invoke("Hello")
+        return llm
+    except Exception as e:
+        if "401" in str(e):
+            st.error("Authentication Error: The OpenRouter API key is invalid or has expired. Please check your key and try again. You can find your key on the OpenRouter website.")
+        else:
+            st.error(f"An error occurred while initializing the language model: {e}")
+        return None
 
 @st.cache_resource
 def get_sentence_transformer():
@@ -41,48 +53,67 @@ def get_title_and_abstract(text):
         abstract = " ".join(lines[1:10])
     return title, abstract
 
+import time
+
 def check_novelty(title, abstract, model):
     st.subheader("Novelty Analysis")
-    try:
-        search = arxiv.Search(query=f'ti:"{title}"', max_results=10, sort_by=arxiv.SortCriterion.Relevance)
-        results = list(search.results())
-        if not results:
-            st.warning("Could not find any similar papers on arXiv based on the title.")
-            return 1.0, 0
-        
-        st.info(f"Found {len(results)} potentially similar papers. Comparing abstracts...")
-        arxiv_abstracts = [result.summary for result in results]
-        uploaded_abstract_embedding = model.encode([abstract])
-        arxiv_abstract_embeddings = model.encode(arxiv_abstracts)
-        
-        d = arxiv_abstract_embeddings.shape[1]
-        index = faiss.IndexFlatL2(d)
-        index.add(arxiv_abstract_embeddings)
-        
-        k = min(5, len(results))
-        distances, indices = index.search(uploaded_abstract_embedding, k)
-        
-        st.markdown("---")
-        st.subheader("Top 5 Most Similar Papers on arXiv:")
-        
-        # Higher similarity should lead to lower novelty_score.
-        # Let's define novelty as 1 - similarity.
-        top_similarity = 1 / (1 + distances[0][0])
-        novelty_score = 1 - top_similarity
+    max_retries = 3
+    retry_delay = 5  # seconds
 
+    for attempt in range(max_retries):
+        try:
+            search = arxiv.Search(query=f'ti:"{title}"', max_results=10, sort_by=arxiv.SortCriterion.Relevance)
+            results = list(search.results())
+            
+            if not results:
+                st.warning("Could not find any similar papers on arXiv based on the title.")
+                return 1.0, 0
+            
+            st.info(f"Found {len(results)} potentially similar papers. Comparing abstracts...")
+            arxiv_abstracts = [result.summary for result in results]
+            uploaded_abstract_embedding = model.encode([abstract])
+            arxiv_abstract_embeddings = model.encode(arxiv_abstracts)
+            
+            d = arxiv_abstract_embeddings.shape[1]
+            index = faiss.IndexFlatL2(d)
+            index.add(arxiv_abstract_embeddings)
+            
+            k = min(5, len(results))
+            distances, indices = index.search(uploaded_abstract_embedding, k)
+            
+            st.markdown("---")
+            st.subheader("Top 5 Most Similar Papers on arXiv:")
+            
+            top_similarity = 1 / (1 + distances[0][0])
+            novelty_score = 1 - top_similarity
 
-        for i in range(k):
-            sim_index = indices[0][i]
-            sim_score = 1 / (1 + distances[0][i])
-            st.markdown(f"**{sim_score:.2f} Similarity** - [{results[sim_index].title}]({results[sim_index].entry_id})")
-            st.text(f"Published: {results[sim_index].published.date()}")
-            with st.expander("Show Abstract"):
-                st.write(results[sim_index].summary)
-        return novelty_score, len(results)
+            for i in range(k):
+                sim_index = indices[0][i]
+                sim_score = 1 / (1 + distances[0][i])
+                st.markdown(f"**{sim_score:.2f} Similarity** - [{results[sim_index].title}]({results[sim_index].entry_id})")
+                st.text(f"Published: {results[sim_index].published.date()}")
+                arxiv_abstract = results[sim_index].summary
+                
+                if len(arxiv_abstract) > MAX_ABSTRACT_LENGTH:
+                    truncated_arxiv_abstract = arxiv_abstract[:MAX_ABSTRACT_LENGTH] + "..."
+                    st.write(truncated_arxiv_abstract)
+                    with st.expander("Show Full Abstract"):
+                        st.write(arxiv_abstract)
+                else:
+                    with st.expander("Show Abstract"):
+                        st.write(arxiv_abstract)
+            return novelty_score, len(results)
 
-    except Exception as e:
-        st.error(f"An error occurred during novelty analysis: {e}")
-        return 0.5, 0
+        except arxiv.exceptions.HTTPForbidden as e:
+            st.error(f"An error occurred during novelty analysis: {e}")
+            st.warning(f"Attempt {attempt + 1} of {max_retries} failed. Retrying in {retry_delay} seconds...")
+            time.sleep(retry_delay)
+        except Exception as e:
+            st.error(f"An unexpected error occurred: {e}")
+            break 
+
+    st.error("Failed to retrieve data from arXiv after multiple attempts.")
+    return 0.5, 0
 
 def detect_statistical_inconsistencies(text, llm):
     st.subheader("Statistical Inconsistency Analysis")
@@ -224,7 +255,14 @@ if uploaded_file:
         
         st.header("Uploaded Paper")
         st.write(f"**Title:** {title}")
-        st.write(f"**Abstract:** {abstract}")
+        
+        if len(abstract) > MAX_ABSTRACT_LENGTH:
+            truncated_abstract = abstract[:MAX_ABSTRACT_LENGTH] + "..."
+            st.write(f"**Abstract:** {truncated_abstract}")
+            with st.expander("View Full Abstract"):
+                st.write(abstract)
+        else:
+            st.write(f"**Abstract:** {abstract}")
 
         novelty_score, citation_overlap = check_novelty(title, abstract, sentence_model)
         num_inconsistencies = detect_statistical_inconsistencies(paper_text, llm)
